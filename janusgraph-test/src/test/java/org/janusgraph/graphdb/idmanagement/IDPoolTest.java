@@ -113,7 +113,7 @@ public class IDPoolTest {
         try {
             pool.nextID();
             fail();
-        } catch (JanusGraphException e) {
+        } catch (JanusGraphException ignored) {
 
         }
 
@@ -143,7 +143,7 @@ public class IDPoolTest {
             }
 
             @Override
-            public List<KeyRange> getLocalIDPartition() throws BackendException {
+            public List<KeyRange> getLocalIDPartition() {
                 throw new IllegalArgumentException();
             }
 
@@ -153,7 +153,7 @@ public class IDPoolTest {
             }
 
             @Override
-            public void close() throws BackendException {
+            public void close() {
                 throw new IllegalArgumentException();
             }
 
@@ -186,7 +186,7 @@ public class IDPoolTest {
         try {
             pool.nextID();
             fail();
-        } catch (JanusGraphException e) {
+        } catch (JanusGraphException ignored) {
 
         }
 

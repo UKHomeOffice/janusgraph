@@ -70,7 +70,7 @@ There are several example configuration files in the `conf/` directory that can 
 [source, java]
 ----
 // Connect to Cassandra on localhost using a default configuration
-graph = JanusGraphFactory.open("conf/janusgraph-cassandra.properties")
+graph = JanusGraphFactory.open("conf/gremlin-server/http-janusgraph-hbase-server.properties")
 // Connect to HBase on localhost using a default configuration
 graph = JanusGraphFactory.open("conf/janusgraph-hbase.properties")
 ----
@@ -224,7 +224,7 @@ mgmt.commit()
 
 Properties on vertices and edges are key-value pairs. For instance, the property `name='Daniel'` has the key `name` and the value `'Daniel'`. Property keys are part of the JanusGraph schema and can constrain the allowed data types and cardinality of values.
 
-To define a property key, call `makePropertyKey(String)` on an open graph or management transaction and provide the name of the property key as the argument. Property key names must be unique in the graph. This method returns a builder for the property keys.
+To define a property key, call `makePropertyKey(String)` on an open graph or management transaction and provide the name of the property key as the argument. Property key names must be unique in the graph, and it is recommended to avoid spaces or special characters in property names. This method returns a builder for the property keys.
 
 ==== Property Key Data Type
 
@@ -329,6 +329,41 @@ Note, that schema name changes may not be immediately visible in currently runni
 Should the need arise to re-define an existing schema type, it is recommended to change the name of this type to a name that is not currently (and will never be) in use. After that, a new label or key can be defined with the original name, thereby effectively replacing the old one.
 However, note that this would not affect vertices, edges, or properties previously written with the existing type. Redefining existing graph elements is not supported online and must be accomplished through a batch graph transformation.
 
+=== Schema Constraints
+
+The definition of the schema allows users to configure explicit property and connection constraints. Properties can be bound to specific vertex label and/or edge labels. Moreover, connection constraints allow users to explicitly define which two vertex labels can be connected by an edge label. These constraints can be used to ensure that a graph matches a given domain model. For example for the graph of the gods, a `god` can be a brother of another `god`, but not of a `monster` and a `god` can have a property `age`, but `location` can not have a property `age`. These constraints are disabled by default.
+
+Enable these schema constraints by setting `schema.constraints=true`. This setting depends on the setting `schema.default`. If config `schema.default` is set to `none`, then an `IllegalArgumentException` is thrown for schema constraint violations. If `schema.default` is not set `none`, schema constraints are automatically created, but no exception is thrown.
+Activating schema constraints has no impact on the existing data, because these schema constraints are only applied during the insertion process. So reading of data is not affected at all by those constraints.
+
+Multiple properties can be bound to a vertex using `JanusGraphManagement.addProperties(VertexLabel, PropertyKey...)`, for example:
+
+[source, gremlin]
+mgmt = graph.openManagement()
+person = mgmt.makeVertexLabel('person').make()
+name = mgmt.makePropertyKey('name').dataType(String.class).cardinality(Cardinality.SET).make()
+birthDate = mgmt.makePropertyKey('birthDate').dataType(Long.class).cardinality(Cardinality.SINGLE).make()
+mgmt.addProperties(person, name, birthDate)
+mgmt.commit()
+
+Multiple properties can be bound to an edge using `JanusGraphManagement.addProperties(EdgeLabel, PropertyKey...)`, for example:
+
+[source, gremlin]
+mgmt = graph.openManagement()
+follow = mgmt.makeEdgeLabel('follow').multiplicity(MULTI).make()
+name = mgmt.makePropertyKey('name').dataType(String.class).cardinality(Cardinality.SET).make()
+mgmt.addProperties(follow, name)
+mgmt.commit()
+
+Connections can be defined using `JanusGraphManagement.addConnection(EdgeLabel, VertexLabel out, VertexLabel in)` between an outgoing, an incoming and an edge, for example:
+
+[source, gremlin]
+mgmt = graph.openManagement()
+person = mgmt.makeVertexLabel('person').make()
+company = mgmt.makeVertexLabel('company').make()
+works = mgmt.makeEdgeLabel('works').multiplicity(MULTI).make()
+mgmt.addConnection(works, person, company)
+mgmt.commit()
 
 [[gremlin]]
 == Gremlin Query Language
@@ -507,7 +542,7 @@ Run gremlin.sh to connect.
 [[first-example-connecting-gremlin-server]]
 ===== Connecting to Gremlin Server
 
-After running janusgraph.sh, Gremlin Server will be ready to listen for WebSocket connections.  The easiest way to test the connection is with Gremlin Console.
+After running `janusgraph.sh`, Gremlin Server will be ready to listen for WebSocket connections.  The easiest way to test the connection is with Gremlin Console.
 
 Start http://tinkerpop.apache.org/docs/{tinkerpop_version}/reference#gremlin-console[Gremlin Console] with `bin/gremlin.sh` and use the `:remote` and `:>` commands to issue Gremlin to Gremlin Server:
 
@@ -530,32 +565,75 @@ gremlin> :> g.V().values('name')
 ==>stephen
 ----
 
-The `:remote` command tells the console to configure a remote connection to Gremlin Server using the `conf/remote.yaml` file to connect.  That file points to a Gremlin Server instance running on `localhost`.  The `:>` is the "submit" command which sends the Gremlin on that line to the currently active remote.
+The `:remote` command tells the console to configure a remote connection to Gremlin Server using the `conf/remote.yaml` file to connect.  That file points to a Gremlin Server instance running on `localhost`.  The `:>` is the "submit" command which sends the Gremlin on that line to the currently active remote. By default remote conenctions are sessionless, meaning that each line sent in the console is interpreted as a single request. Multiple statements can be sent on a single line using a semicolon as the delimiter. Alternately, you can establish a console with a session by specifying https://tinkerpop.apache.org/docs/current/reference/#sessions[session] when creating the connection. A https://tinkerpop.apache.org/docs/current/reference/#console-sessions[console session] allows you to reuse variables across several lines of input.
+
+----
+gremlin> :remote connect tinkerpop.server conf/remote.yaml
+==>Configured localhost/127.0.0.1:8182
+gremlin> graph
+==>standardjanusgraph[cassandrathrift:[127.0.0.1]]
+gremlin> g
+==>graphtraversalsource[standardjanusgraph[cassandrathrift:[127.0.0.1]], standard]
+gremlin> g.V()
+gremlin> user = "Chris"
+==>Chris
+gremlin> graph.addVertex("name", user)
+No such property: user for class: Script21
+Type ':help' or ':h' for help.
+Display stack trace? [yN]
+gremlin> :remote connect tinkerpop.server conf/remote.yaml session
+==>Configured localhost/127.0.0.1:8182-[9acf239e-a3ed-4301-b33f-55c911e04052]
+gremlin> g.V()
+gremlin> user = "Chris"
+==>Chris
+gremlin> user
+==>Chris
+gremlin> graph.addVertex("name", user)
+==>v[4344]
+gremlin> g.V().values('name')
+==>Chris
+----
+
+=== Cleaning up after the Pre-Packaged Distribution
+
+If you want to start fresh and remove the database and logs you can use the clean command with `janusgraph.sh`. The server should be stopped before running the clean operation. 
+[source, text]
+----
+$ cd /Path/to/janusgraph/janusgraph-0.2.0-hadoop2/
+$ ./bin/janusgraph.sh stop
+Killing Gremlin-Server (pid 91505)...
+Killing Elasticsearch (pid 91402)...
+Killing Cassandra (pid 91219)...
+$ ./bin/janusgraph.sh clean
+Are you sure you want to delete all stored data and logs? [y/N] y
+Deleted data in /Path/to/janusgraph/janusgraph-0.2.0-hadoop2/db
+Deleted logs in /Path/to/janusgraph/janusgraph-0.2.0-hadoop2/log
+----
 
 === JanusGraph Server as a WebSocket Endpoint
 
 The default configuration described in <<server-getting-started>> is already a WebSocket configuration.  If you want to alter the default configuration to work with your own Cassandra or HBase environment rather than use the quick start environment, follow these steps:
 
 .To Configure JanusGraph Server For WebSocket
-. Test a local connection to a JanusGraph database first.  This step applies whether using the Gremlin Console to test the connection, or whether connecting from a program.  Make appropriate changes in a properties file in the ./conf directory for your environment.  For example, edit ./conf/janusgraph-hbase.properties and make sure the storage.backend, storage.hostname and storage.hbase.table parameters are specified correctly.  For more information on configuring JanusGraph for various storage backends, see <<storage-backends>>.  Make sure the properties file contains the following line:
+. Test a local connection to a JanusGraph database first.  This step applies whether using the Gremlin Console to test the connection, or whether connecting from a program.  Make appropriate changes in a properties file in the `./conf` directory for your environment.  For example, edit `./conf/janusgraph-hbase.properties` and make sure the storage.backend, storage.hostname and storage.hbase.table parameters are specified correctly.  For more information on configuring JanusGraph for various storage backends, see <<storage-backends>>.  Make sure the properties file contains the following line:
 +
 ```
 gremlin.graph=org.janusgraph.core.JanusGraphFactory
 ```
 
-. Once a local configuration is tested and you have a working properties file, copy the properties file from the ./conf directory to the ./conf/gremlin-server directory.
+. Once a local configuration is tested and you have a working properties file, copy the properties file from the `./conf` directory to the `./conf/gremlin-server` directory.
 +
 ```
 cp conf/janusgraph-hbase.properties conf/gremlin-server/socket-janusgraph-hbase-server.properties
 ```
 +
-. Copy ./conf/gremlin-server/gremlin-server.yaml to a new file called socket-gremlin-server.yaml.  Do this in case you need to refer to the original version of the file
+. Copy `./conf/gremlin-server/gremlin-server.yaml` to a new file called `socket-gremlin-server.yaml`.  Do this in case you need to refer to the original version of the file
 +
 ```
 cp conf/gremlin-server/gremlin-server.yaml conf/gremlin-server/socket-gremlin-server.yaml
 ```
 +
-. Edit the socket-gremlin-server.yaml file and make the following updates:
+. Edit the `socket-gremlin-server.yaml` file and make the following updates:
 .. If you are planning to connect to JanusGraph Server from something other than localhost, update the IP address for host:
 +
 ```
@@ -574,7 +652,7 @@ graphs: {
 ```
 bin/gremlin-server.sh ./conf/gremlin-server/socket-gremlin-server.yaml
 ```
-IMPORTANT: Do not use bin/janusgraph.sh.  That starts the default configuration, which starts a separate Cassandra/Elasticsearch environment.
+IMPORTANT: Do not use `bin/janusgraph.sh`.  That starts the default configuration, which starts a separate Cassandra/Elasticsearch environment.
 +
 . The JanusGraph Server should now be running in WebSocket mode and can be tested by following the instructions in <<first-example-connecting-gremlin-server>>
 
@@ -585,25 +663,25 @@ IMPORTANT: Do not use bin/janusgraph.sh.  That starts the default configuration,
 The default configuration described in <<server-getting-started>> is a WebSocket configuration.  If you want to alter the default configuration in order to use JanusGraph Server as an HTTP endpoint for your JanusGraph database, follow these steps:
 
 .To Configure JanusGraph Server for HTTP
-. Test a local connection to a JanusGraph database first.  This step applies whether using the Gremlin Console to test the connection, or whether connecting from a program.  Make appropriate changes in a properties file in the ./conf directory for your environment.  For example, edit ./conf/janusgraph-hbase.properties and make sure the storage.backend, storage.hostname and storage.hbase.table parameters are specified correctly.  For more information on configuring JanusGraph for various storage backends, see <<storage-backends>>.  Make sure the properties file contains the following line:
+. Test a local connection to a JanusGraph database first.  This step applies whether using the Gremlin Console to test the connection, or whether connecting from a program.  Make appropriate changes in a properties file in the `./conf` directory for your environment.  For example, edit `./conf/janusgraph-hbase.properties` and make sure the storage.backend, storage.hostname and storage.hbase.table parameters are specified correctly.  For more information on configuring JanusGraph for various storage backends, see <<storage-backends>>.  Make sure the properties file contains the following line:
 +
 ```
 gremlin.graph=org.janusgraph.core.JanusGraphFactory
 ```
 
-. Once a local configuration is tested and you have a working properties file, copy the properties file from the ./conf directory to the ./conf/gremlin-server directory.
+. Once a local configuration is tested and you have a working properties file, copy the properties file from the `./conf` directory to the `./conf/gremlin-server` directory.
 +
 ```
 cp conf/janusgraph-hbase.properties conf/gremlin-server/http-janusgraph-hbase-server.properties
 ```
 +
-. Copy ./conf/gremlin-server/gremlin-server.yaml to a new file called http-gremlin-server.yaml.  Do this in case you need to refer to the original version of the file
+. Copy `./conf/gremlin-server/gremlin-server.yaml` to a new file called `http-gremlin-server.yaml`.  Do this in case you need to refer to the original version of the file
 +
 ```
 cp conf/gremlin-server/gremlin-server.yaml conf/gremlin-server/http-gremlin-server.yaml
 ```
 +
-. Edit the http-gremlin-server.yaml file and make the following updates:
+. Edit the `http-gremlin-server.yaml` file and make the following updates:
 .. If you are planning to connect to JanusGraph Server from something other than localhost, update the IP address for host:
 +
 ```
@@ -635,22 +713,113 @@ bin/gremlin-server.sh ./conf/gremlin-server/http-gremlin-server.yaml
 curl -XPOST -Hcontent-type:application/json -d '{"gremlin":"g.V().count()"}' http://[IP for JanusGraph server host]:8182
 ```
 
+=== JanusGraph Server as Both a WebSocket and HTTP Endpoint
+
+As of JanusGraph 0.2.0, you can configure your `gremlin-server.yaml` to accept both WebSocket and HTTP connections over the same port. This can be achieved by changing the channelizer in any of the previous examples as follows.
+
+```
+channelizer: org.apache.tinkerpop.gremlin.server.channel.WsAndHttpChannelizer
+```
+
 === Advanced JanusGraph Server Configurations
 
-==== WebSocket versus HTTP
+==== Authentication over HTTP
 
-JanusGraph Server must be run with a configuration for either WebSocket (for Gremlin Console or other WebSocket programs) or re-configured for HTTP to work with HTTP clients.
+IMPORTANT: In the following example, credentialsDb should be different from the graph(s) you are using. It should be configured with the correct backend and a different keyspace, table, or storage directory as appropriate for the configured backend. This graph will be used for storing usernames and passwords.
 
-Currently, there is no way to configure a single running instance of JanusGraph Server to communicate simultaneously with clients talking WebSocket and HTTP.
-However, it is possible to create configuration files (following the steps in this chapter) for both WebSocket and HTTP and start two instances of the JanusGraph Server by pointing it to the various configurations when it is started.
-In this way, the same JanusGraph database instance can be reached through different JanusGraph Servers through both WebSocket and HTTP calls.
-Make sure the port parameter in each yaml configuration is different if starting more than one JanusGraph Server on the same machine:
+===== HTTP Basic authentication
+To enable Basic authentication in JanusGraph Server include the following configuration in your `gremlin-server.yaml`.
 
 ```
-port: 8182
+ authentication: {
+   authenticator: org.janusgraph.graphdb.tinkerpop.gremlin.server.auth.JanusGraphSimpleAuthenticator,
+   authenticationHandler: org.apache.tinkerpop.gremlin.server.handler.HttpBasicAuthenticationHandler,
+   config: {
+     defaultUsername: user,
+     defaultPassword: password,
+     credentialsDb: conf/janusgraph-credentials-server.properties
+    }
+ }
 ```
 
-In the future, the option to have one running instance of JanusGraph Server supporting multiple protocols may be possible.
+Verify that basic authentication is configured correctly. For example
+
+```
+curl -v -XPOST http://localhost:8182 -d '{"gremlin": "g.V().count()"}'
+```
+
+should return a 401 if the authentication is configured correctly and
+
+```
+curl -v -XPOST http://localhost:8182 -d '{"gremlin": "g.V().count()"}' -u user:password
+```
+should return a 200 and the result of 4 if authentication is configured correctly.
+
+==== Authentication over WebSocket
+Authentication over WebSocket occurs through a Simple Authentication and Security Layer (https://en.wikipedia.org/wiki/Simple_Authentication_and_Security_Layer[SASL]) mechanism.
+
+
+To enable SASL authentication include the following configuration in the `gremlin-server.yaml`
+
+```
+authentication: {
+  authenticator: org.janusgraph.graphdb.tinkerpop.gremlin.server.auth.JanusGraphSimpleAuthenticator,
+  authenticationHandler: org.apache.tinkerpop.gremlin.server.handler.SaslAuthenticationHandler,
+  config: {
+    defaultUsername: user,
+    defaultPassword: password,
+    credentialsDb: conf/janusgraph-credentials-server.properties
+  }
+}
+```
+
+IMPORTANT: In the preceding example, credentialsDb should be different from the graph(s) you are using. It should be configured with the correct backend and a different keyspace, table, or storage directory as appropriate for the configured backend. This graph will be used for storing usernames and passwords.
+
+If you are connecting through the gremlin console, your remote yaml file should ammend the `username` and `password` properties with the appropriate values.
+
+```
+username: user
+password: password
+```
+
+==== Authentication over HTTP and WebSocket
+If you are using the combined channelizer for both HTTP and WebSocket you can use the SaslAndHMACAuthenticator to authorize through either WebSocket through SASL, HTTP through basic auth, and HTTP through hash-based messsage authentication code (https://en.wikipedia.org/wiki/Hash-based_message_authentication_code[HMAC]) Auth. HMAC is a token based authentication designed to be used over HTTP. You first acquire a token via the `/session` endpoint and then use that to authenticate. It is used to amortize the time spent encrypting the password using basic auth.
+
+The `gremlin-server.yaml` should include the following configurations
+
+```
+authentication: {
+  authenticator: org.janusgraph.graphdb.tinkerpop.gremlin.server.auth.SaslAndHMACAuthenticator,
+  authenticationHandler: org.janusgraph.graphdb.tinkerpop.gremlin.server.handler.SaslAndHMACAuthenticationHandler,
+  config: {
+    defaultUsername: user,
+    defaultPassword: password,
+    hmacSecret: secret,
+    credentialsDb: conf/janusgraph-credentials-server.properties
+  }
+}
+```
+
+IMPORTANT: In the preceding example, credentialsDb should be different from the graph(s) you are using. It should be configured with the correct backend and a different keyspace, table, or storage directory as appropriate for the configured backend. This graph will be used for storing usernames and passwords.
+
+IMPORTANT: Note the hmacSecret here. This should be the same across all running JanusGraph servers if you want to be able to use the same HMAC token on each server.
+
+For HMAC authentication over HTTP, this creates a `/session` endpoint that provides a token that expires after an hour by default. This timeout for the token can be configured through the `tokenTimeout` configuration option in the `authentication.config` map. This value is a Long value and in milliseconds.
+
+You can obtain the token using curl by issuing a get request to the `/session` endpoint. For example
+
+```
+curl http://localhost:8182/session -XGET -u user:password
+
+{"token": "dXNlcjoxNTA5NTQ2NjI0NDUzOkhrclhYaGhRVG9KTnVSRXJ5U2VpdndhalJRcVBtWEpSMzh5WldqRTM4MW89"}
+```
+
+You can then use that token for authentication by using the "Authorization: Token" header. For example
+
+```
+curl -v http://localhost:8182/session -XPOST -d '{"gremlin": "g.V().count()"}' -H "Authorization: Token dXNlcjoxNTA5NTQ2NjI0NDUzOkhrclhYaGhRVG9KTnVSRXJ5U2VpdndhalJRcVBtWEpSMzh5WldqRTM4MW89"
+```
+
 
 [[gremlin-server-with-janusgraph]]
 ==== Using TinkerPop Gremlin Server with JanusGraph
@@ -773,6 +942,8 @@ It is possible to extend Gremlin Server with other means of communication by imp
 
 include::configuredgraphfactory.adoc[]
 
+include::multinodejanusgraphcluster.adoc[]
+
 [[indexes]]
 == Indexing for Better Performance
 
@@ -812,8 +983,8 @@ mgmt.buildIndex('byNameComposite', Vertex.class).addKey(name).buildCompositeInde
 mgmt.buildIndex('byNameAndAgeComposite', Vertex.class).addKey(name).addKey(age).buildCompositeIndex()
 mgmt.commit()
 //Wait for the index to become available
-mgmt.awaitGraphIndexStatus(graph, 'byNameComposite').call()
-mgmt.awaitGraphIndexStatus(graph, 'byNameAndAgeComposite').call()
+ManagementSystem.awaitGraphIndexStatus(graph, 'byNameComposite').call()
+ManagementSystem.awaitGraphIndexStatus(graph, 'byNameAndAgeComposite').call()
 //Reindex the existing data
 mgmt = graph.openManagement()
 mgmt.updateIndex(mgmt.getGraphIndex("byNameComposite"), SchemaAction.REINDEX).get()
@@ -858,7 +1029,7 @@ name = mgmt.getPropertyKey('name')
 mgmt.buildIndex('byNameUnique', Vertex.class).addKey(name).unique().buildCompositeIndex()
 mgmt.commit()
 //Wait for the index to become available
-mgmt.awaitGraphIndexStatus(graph, 'byNameUnique').call()
+ManagementSystem.awaitGraphIndexStatus(graph, 'byNameUnique').call()
 //Reindex the existing data
 mgmt = graph.openManagement()
 mgmt.updateIndex(mgmt.getGraphIndex("byNameUnique"), SchemaAction.REINDEX).get()
@@ -883,7 +1054,7 @@ age = mgmt.getPropertyKey('age')
 mgmt.buildIndex('nameAndAge', Vertex.class).addKey(name).addKey(age).buildMixedIndex("search")
 mgmt.commit()
 //Wait for the index to become available
-mgmt.awaitGraphIndexStatus(graph, 'nameAndAge').call()
+ManagementSystem.awaitGraphIndexStatus(graph, 'nameAndAge').call()
 //Reindex the existing data
 mgmt = graph.openManagement()
 mgmt.updateIndex(mgmt.getGraphIndex("nameAndAge"), SchemaAction.REINDEX).get()
@@ -904,6 +1075,9 @@ While the index definition example looks similar to the composite index above, i
 g.V().has('name', textContains('hercules')).has('age', inside(20, 50))
 g.V().has('name', textContains('hercules'))
 g.V().has('age', lt(50))
+g.V().has('age', outside(20, 50))
+g.V().has('age', lt(50).or(gte(60)))
+g.V().or(__.has('name', textContains('hercules')), __.has('age', inside(20, 50)))
 
 Mixed indexes support full-text search, range search, geo search and others. Refer to <<search-predicates>> for a list of predicates supported by a particular indexing backend.
 
@@ -923,7 +1097,7 @@ mgmt.addIndexKey(nameAndAge, location)
 mgmt.commit()
 //Previously created property keys already have the status ENABLED, but
 //our newly created property key "location" needs to REGISTER so we wait for both statuses
-mgmt.awaitGraphIndexStatus(graph, 'nameAndAge').status(REGISTERED, ENABLED).call()
+ManagementSystem.awaitGraphIndexStatus(graph, 'nameAndAge').status(SchemaStatus.REGISTERED, SchemaStatus.ENABLED).call()
 //Reindex the existing data
 mgmt = graph.openManagement()
 mgmt.updateIndex(mgmt.getGraphIndex("nameAndAge"), SchemaAction.REINDEX).get()
@@ -965,7 +1139,7 @@ god = mgmt.getVertexLabel('god')
 mgmt.buildIndex('byNameAndLabel', Vertex.class).addKey(name).indexOnly(god).buildCompositeIndex()
 mgmt.commit()
 //Wait for the index to become available
-mgmt.awaitGraphIndexStatus(graph, 'byNameAndLabel').call()
+ManagementSystem.awaitGraphIndexStatus(graph, 'byNameAndLabel').call()
 //Reindex the existing data
 mgmt = graph.openManagement()
 mgmt.updateIndex(mgmt.getGraphIndex("byNameAndLabel"), SchemaAction.REINDEX).get()
@@ -1002,7 +1176,7 @@ battled = mgmt.getEdgeLabel('battled')
 mgmt.buildEdgeIndex(battled, 'battlesByTime', Direction.BOTH, Order.decr, time)
 mgmt.commit()
 //Wait for the index to become available
-mgmt.awaitGraphIndexStatus(graph, 'battlesByTime').call()
+ManagementSystem.awaitGraphIndexStatus(graph, 'battlesByTime').call()
 //Reindex the existing data
 mgmt = graph.openManagement()
 mgmt.updateIndex(mgmt.getGraphIndex("battlesByTime"), SchemaAction.REINDEX).get()
@@ -1021,7 +1195,7 @@ battled = mgmt.getEdgeLabel('battled')
 mgmt.buildEdgeIndex(battled, 'battlesByRatingAndTime', Direction.OUT, Order.decr, rating, time)
 mgmt.commit()
 //Wait for the index to become available
-mgmt.awaitRelationIndexStatus(graph, 'battlesByRatingAndTime', 'battled').call()
+ManagementSystem.awaitRelationIndexStatus(graph, 'battlesByRatingAndTime', 'battled').call()
 //Reindex the existing data
 mgmt = graph.openManagement()
 mgmt.updateIndex(mgmt.getRelationIndex(battled, 'battlesByRatingAndTime'), SchemaAction.REINDEX).get()
@@ -1042,7 +1216,7 @@ Hence, the `battlesByRatingAndTime` index can speed up the first two but not the
 Multiple vertex-centric indexes can be built for the same edge label in order to support different constraint traversals. JanusGraph's query optimizer attempts to pick the most efficient index for any given traversal. Vertex-centric indexes only support equality and range/interval constraints.
 
 [NOTE]
-The property keys used in a vertex-centric index must have an explicitly defined data type (i.e. _not_ `Object.class`) which supports a native sort order.
+The property keys used in a vertex-centric index must have an explicitly defined data type (i.e. _not_ `Object.class`) which supports a native sort order. This means not only that they must implement `Comparable` but that their serializer must impement `OrderPreservingSerializer`. The types that are currently supported are `Boolean`, `UUID`, `Byte`, `Float`, `Long`, `String`, `Integer`, `Date`, `Double`, `Character`, and `Short`
 
 If the vertex-centric index is built against an edge label that is defined in the same management transaction, the index will be immediately available for querying. If the edge label has already been in use, building a vertex-centric index against it requires the execution of a <<reindex, reindex procedure>> to ensure that the index contains all previously added edges. Until the reindex procedure has completed, the index will not be available.
 
@@ -1463,7 +1637,7 @@ When launching JanusGraph with embedded Cassandra, the following warnings may be
 
 `958 [MutationStage:25] WARN  org.apache.cassandra.db.Memtable  - MemoryMeter uninitialized (jamm not specified as java agent); assuming liveRatio of 10.0.  Usually this means cassandra-env.sh disabled jamm because you are using a buggy JRE; upgrade to the Sun JRE instead`
 
-Cassandra uses a Java agent called `MemoryMeter` which allows it to measure the actual memory use of an object, including JVM overhead.  To use https://github.com/jbellis/jamm[JAMM] (Java Agent for Memory Measurements), the path to the JAMM jar must be specific in the Java javaagent parameter when launching the JVM (e.g. `-javaagent:path/to/jamm.jar`) through either janusgraph.sh, gremlin.sh, or Gremlin Server:
+Cassandra uses a Java agent called `MemoryMeter` which allows it to measure the actual memory use of an object, including JVM overhead.  To use https://github.com/jbellis/jamm[JAMM] (Java Agent for Memory Measurements), the path to the JAMM jar must be specific in the Java javaagent parameter when launching the JVM (e.g. `-javaagent:path/to/jamm.jar`) through either `janusgraph.sh`, `gremlin.sh`, or Gremlin Server:
 
 [source, bash]
 export JANUSGRAPH_JAVA_OPTS=-javaagent:$JANUSGRAPH_HOME/lib/jamm-$MAVEN{jamm.version}.jar
@@ -1475,6 +1649,26 @@ By default, JanusGraph uses the Astyanax library to connect to Cassandra cluster
 === Elasticsearch OutOfMemoryException
 
 When numerous clients are connecting to Elasticsearch, it is likely that an `OutOfMemoryException` occurs. This is not due to a memory issue, but to the OS not allowing more threads to be spawned by the user (the user running Elasticsearch). To circumvent this issue, increase the number of allowed processes to the user running Elasticsearch. For example, increase the `ulimit -u` from the default 1024 to 10024.
+
+=== Dropping a Database
+
+To drop a database using the Gremlin Console you can call `JanusGraphFactory.drop(graph)`. The graph you want to drop needs to be defined prior to running the drop method.
+
+With ConfiguredGraphFactory
+[source, gremlin]
+----
+graph = ConfiguredGraphFactory.open('example')
+ConfiguredGraphFactory.drop('example');
+----
+
+With JanusGraphFactory
+[source, gremlin]
+----
+graph = JanusGraphFactory.open('path/to/configuration.properties')
+JanusGraphFactory.drop(graph);
+----
+
+Note that on JanusGraph versions prior to 0.3.0 if multiple Gremlin Server instances are connecting to the graph that has been dropped it is reccomended to close the graph on all active nodes by running either `JanusGraphFactory.close(graph)` or `ConfiguredGraphFactory.close("example")` depending on which graph manager is in use. Closing and reopening the graph on all active nodes will prevent cached(stale) references to the graph that has been dropped. ConfiguredGraphFactory graphs that are dropped may need to have their configurations recreated using the <<configuredgraphfactory.adoc#graph-configurations, graph configuration singleton>> or <<configuredgraphfactory.adoc#template-configuration, template configuration>>.
 
 [[limitations]]
 == Technical Limitations

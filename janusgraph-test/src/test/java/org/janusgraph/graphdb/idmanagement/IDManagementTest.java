@@ -47,14 +47,6 @@ public class IDManagementTest {
     private static final IDManager.VertexIDType[] USER_VERTEX_TYPES = {IDManager.VertexIDType.NormalVertex,
             IDManager.VertexIDType.PartitionedVertex, IDManager.VertexIDType.UnmodifiableVertex};
 
-    @Before
-    public void setUp() throws Exception {
-    }
-
-    @After
-    public void tearDown() throws Exception {
-    }
-
     @Test
     public void EntityIDTest() {
         testEntityID(12, 2341, 1234123, 1235123);
@@ -65,12 +57,12 @@ public class IDManagementTest {
         try {
             testEntityID(0, 1, 242342, 242345);
             fail();
-        } catch (IllegalArgumentException e) {}
+        } catch (IllegalArgumentException ignored) {}
 
         try {
             testEntityID(0, 0, -11, -10);
             fail();
-        } catch (IllegalArgumentException e) {}
+        } catch (IllegalArgumentException ignored) {}
 
     }
 
@@ -87,7 +79,7 @@ public class IDManagementTest {
         try {
             IDManager.getTemporaryVertexID(IDManager.VertexIDType.RelationType,5);
             fail();
-        } catch (IllegalArgumentException e) {}
+        } catch (IllegalArgumentException ignored) {}
 
         for (long count=minCount;count<maxCount;count++) {
 

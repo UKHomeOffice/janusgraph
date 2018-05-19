@@ -93,18 +93,14 @@ public class StandardLogProcessorFramework implements LogProcessorFramework {
         if (!isOpen) return;
         isOpen = false;
         try {
-            try {
-                for (Log log : processorLogs.values()) {
-                    log.close();
-                }
-                processorLogs.clear();
-            } finally {
+            for (Log log : processorLogs.values()) {
+                log.close();
             }
+            processorLogs.clear();
         } catch (BackendException e) {
             throw new JanusGraphException(e);
         }
     }
-
 
     @Override
     public LogProcessorBuilder addLogProcessor(String logIdentifier) {
@@ -232,7 +228,7 @@ public class StandardLogProcessorFramework implements LogProcessorFramework {
             for (int i=1;i<=retryAttempts;i++) {
                 StandardJanusGraphTx tx = (StandardJanusGraphTx)graph.newTransaction();
                 StandardChangeState changes = new StandardChangeState();
-                StandardTransactionId transactionId = null;
+                final StandardTransactionId transactionId;
                 try {
                     ReadBuffer content = message.getContent().asReadBuffer();
                     String senderId =  message.getSenderId();
@@ -265,6 +261,9 @@ public class StandardLogProcessorFramework implements LogProcessorFramework {
                 }
             }
         }
+
+        @Override
+        public void updateState() {}
     }
 
 }

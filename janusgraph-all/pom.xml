@@ -31,6 +31,11 @@
         </dependency>
         <dependency>
             <groupId>org.janusgraph</groupId>
+            <artifactId>janusgraph-server</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.janusgraph</groupId>
             <artifactId>janusgraph-cassandra</artifactId>
             <version>${project.version}</version>
             <exclusions>
@@ -44,11 +49,17 @@
                 </exclusion>
             </exclusions>
         </dependency>
-        <dependency>
-            <groupId>org.janusgraph</groupId>
-            <artifactId>janusgraph-cql</artifactId>
-            <version>${project.version}</version>
-        </dependency>
+      <dependency>
+        <groupId>org.janusgraph</groupId>
+        <artifactId>janusgraph-cql</artifactId>
+        <version>${project.version}</version>
+        <exclusions>
+          <exclusion>
+            <groupId>io.dropwizard.metrics</groupId>
+            <artifactId>metrics-core</artifactId>
+          </exclusion>
+        </exclusions>
+      </dependency>
         <dependency>
             <groupId>org.janusgraph</groupId>
             <artifactId>janusgraph-berkeleyje</artifactId>
@@ -195,11 +206,13 @@
                 </exclusion>
             </exclusions>
         </dependency>
+      <!-- LPPM - disabled SOLR 
         <dependency>
             <groupId>org.janusgraph</groupId>
             <artifactId>janusgraph-solr</artifactId>
             <version>${project.version}</version>
         </dependency>
+      -->
         <dependency>
             <groupId>org.janusgraph</groupId>
             <artifactId>janusgraph-lucene</artifactId>

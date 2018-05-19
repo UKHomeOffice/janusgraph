@@ -85,12 +85,12 @@ public abstract class LogTest {
 
     @Test
     public void smallSendReceiveSerial() throws Exception {
-        simpleSendReceive(100, 50, TIMEOUT_MS);
+        simpleSendReceive(100, 50);
     }
 
     @Test
     public void mediumSendReceiveSerial() throws Exception {
-        simpleSendReceive(2000,1, TIMEOUT_MS);
+        simpleSendReceive(2000,1);
     }
 
     @Test
@@ -222,11 +222,11 @@ public abstract class LogTest {
         try {
             l1.registerReader(ReadMarker.fromIdentifierOrNow("other"));
             fail();
-        } catch (IllegalArgumentException e) {}
+        } catch (IllegalArgumentException ignored) {}
         try {
             l1.registerReader(ReadMarker.fromTime(Instant.now().minusMillis(100)));
             fail();
-        } catch (IllegalArgumentException e) {}
+        } catch (IllegalArgumentException ignored) {}
         l1.registerReader(ReadMarker.fromNow(), new StoringReader(2));
     }
 
@@ -252,8 +252,8 @@ public abstract class LogTest {
         assertEquals(3, reader2.totalValue.get());
     }
 
-    protected void simpleSendReceive(int numMessages, int delayMS, long timeoutMS) throws Exception {
-        sendReceive(1, numMessages, delayMS, true, timeoutMS);
+    protected void simpleSendReceive(int numMessages, int delayMS) throws Exception {
+        sendReceive(1, numMessages, delayMS, true, LogTest.TIMEOUT_MS);
     }
 
     public void sendReceive(int readers, int numMessages, int delayMS, boolean expectMessageOrder, long timeoutMS) throws Exception {
@@ -302,6 +302,9 @@ public abstract class LogTest {
             processMessage(message);
             latch.countDown();
         }
+
+        @Override
+        public void updateState() {}
 
         /**
          * Subclasses can override this method to perform additional processing on the message.

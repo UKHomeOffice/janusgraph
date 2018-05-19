@@ -305,7 +305,6 @@ public class ConcurrentLRUCache<V> {
                 oldestEntry = newOldestEntry == Long.MAX_VALUE ? oldestEntry : newOldestEntry;
                 newOldestEntry = Long.MAX_VALUE;
                 newestEntry = newNewestEntry;
-                newNewestEntry = -1;
                 wantToLongeep = lowerWaterMark - numLongept;
                 wantToRemove = sz - lowerWaterMark - numRemoved;
 
@@ -505,7 +504,7 @@ public class ConcurrentLRUCache<V> {
     private static class CacheEntry<Long, V> implements Comparable<CacheEntry<Long, V>> {
         final Long key;
         final V value;
-        volatile long lastAccessed = 0;
+        volatile long lastAccessed;
         long lastAccessedCopy = 0;
 
 
@@ -625,7 +624,7 @@ public class ConcurrentLRUCache<V> {
                     if (stop) break;
                     try {
                         this.wait();
-                    } catch (InterruptedException e) {
+                    } catch (InterruptedException ignored) {
                     }
                 }
                 if (stop) break;

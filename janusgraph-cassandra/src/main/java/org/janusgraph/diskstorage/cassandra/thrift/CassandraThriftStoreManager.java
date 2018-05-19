@@ -439,8 +439,6 @@ public class CassandraThriftStoreManager extends AbstractCassandraStoreManager {
             if (conn != null && conn.getClient() != null) {
                 try {
                     conn.getClient().set_keyspace(SYSTEM_KS);
-                } catch (InvalidRequestException e) {
-                    log.warn("Failed to reset keyspace", e);
                 } catch (TException e) {
                     log.warn("Failed to reset keyspace", e);
                 }
@@ -472,7 +470,7 @@ public class CassandraThriftStoreManager extends AbstractCassandraStoreManager {
         }
     }
 
-    private KsDef ensureKeyspaceExists(String keyspaceName) throws TException, BackendException {
+    private KsDef ensureKeyspaceExists(String keyspaceName) throws BackendException {
         CTConnection connection = null;
 
         try {
@@ -488,8 +486,8 @@ public class CassandraThriftStoreManager extends AbstractCassandraStoreManager {
                 // Keyspace didn't exist; create it
                 log.debug("Creating keyspace {}...", keyspaceName);
 
-                KsDef ksdef = new KsDef().setName(keyspaceName)
-                        .setCf_defs(new LinkedList<CfDef>()) // cannot be null but can be empty
+                final KsDef ksdef = new KsDef().setName(keyspaceName)
+                        .setCf_defs(new LinkedList<>()) // cannot be null but can be empty
                         .setStrategy_class(storageConfig.get(REPLICATION_STRATEGY))
                         .setStrategy_options(strategyOptions);
 
@@ -534,10 +532,6 @@ public class CassandraThriftStoreManager extends AbstractCassandraStoreManager {
     }
 
     private void ensureColumnFamilyExists(String ksName, String cfName) throws BackendException {
-        ensureColumnFamilyExists(ksName, cfName, "org.apache.cassandra.db.marshal.BytesType");
-    }
-
-    private void ensureColumnFamilyExists(String ksName, String cfName, String comparator) throws BackendException {
         CTConnection conn = null;
         try {
             KsDef keyspaceDef = ensureKeyspaceExists(ksName);
@@ -555,7 +549,7 @@ public class CassandraThriftStoreManager extends AbstractCassandraStoreManager {
             }
 
             if (!foundColumnFamily) {
-                createColumnFamily(client, ksName, cfName, comparator);
+                createColumnFamily(client, ksName, cfName, "org.apache.cassandra.db.marshal.BytesType");
             } else {
                 log.debug("Keyspace {} and ColumnFamily {} were found.", ksName, cfName);
             }

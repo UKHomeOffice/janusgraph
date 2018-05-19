@@ -20,6 +20,7 @@ import org.apache.tinkerpop.gremlin.jsr223.DefaultImportCustomizer;
 import org.apache.tinkerpop.gremlin.jsr223.ImportCustomizer;
 import org.janusgraph.core.BaseVertexQuery;
 import org.janusgraph.core.Cardinality;
+import org.janusgraph.core.ConfiguredGraphFactory;
 import org.janusgraph.core.EdgeLabel;
 import org.janusgraph.core.Idfiable;
 import org.janusgraph.core.JanusGraph;
@@ -74,6 +75,7 @@ import org.janusgraph.core.schema.SchemaManager;
 import org.janusgraph.core.schema.SchemaStatus;
 import org.janusgraph.core.schema.VertexLabelMaker;
 import org.janusgraph.example.GraphOfTheGodsFactory;
+import org.janusgraph.graphdb.database.management.ManagementSystem;
 import org.janusgraph.graphdb.management.ConfigurationManagementGraph;
 import org.janusgraph.graphdb.tinkerpop.JanusGraphIoRegistry;
 
@@ -120,6 +122,7 @@ public class JanusGraphGremlinPlugin extends AbstractGremlinPlugin {
 
         CLASS_IMPORTS.add(BaseVertexQuery.class);
         CLASS_IMPORTS.add(Cardinality.class);
+        CLASS_IMPORTS.add(ConfiguredGraphFactory.class);
         CLASS_IMPORTS.add(EdgeLabel.class);
         CLASS_IMPORTS.add(Idfiable.class);
         CLASS_IMPORTS.add(JanusGraph.class);
@@ -179,6 +182,7 @@ public class JanusGraphGremlinPlugin extends AbstractGremlinPlugin {
         CLASS_IMPORTS.add(GraphOfTheGodsFactory.class);
         CLASS_IMPORTS.add(JanusGraphIoRegistry.class);
         CLASS_IMPORTS.add(ConfigurationManagementGraph.class);
+        CLASS_IMPORTS.add(ManagementSystem.class);
 
         CLASS_IMPORTS.add(Instant.class);
         CLASS_IMPORTS.add(Clock.class);

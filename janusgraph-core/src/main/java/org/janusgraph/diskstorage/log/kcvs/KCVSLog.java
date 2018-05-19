@@ -20,6 +20,7 @@ import org.janusgraph.core.JanusGraphException;
 import org.janusgraph.diskstorage.*;
 import org.janusgraph.diskstorage.util.time.*;
 
+import org.janusgraph.graphdb.database.management.ManagementLogger;
 import org.janusgraph.diskstorage.configuration.ConfigOption;
 import org.janusgraph.diskstorage.configuration.Configuration;
 import org.janusgraph.diskstorage.keycolumnvalue.*;
@@ -200,7 +201,6 @@ public class KCVSLog implements Log, BackendOperation.TransactionalProvider {
     private final Duration readPollingInterval;
     private final Duration readLagTime;
     private final Duration maxReadTime;
-    private final boolean allowReadMarkerRecovery = true;
 
     /**
      * Thread pool to read messages in the specified interval from the various keys in a time slice AND to process
@@ -631,6 +631,11 @@ public class KCVSLog implements Log, BackendOperation.TransactionalProvider {
                     pos++;
                 }
             }
+            readExecutor.scheduleWithFixedDelay(
+                    new MessageReaderStateUpdater(),
+                    INITIAL_READER_DELAY.toNanos(),
+                    readPollingInterval.toNanos(),
+                    TimeUnit.NANOSECONDS);
         }
     }
 
@@ -638,6 +643,15 @@ public class KCVSLog implements Log, BackendOperation.TransactionalProvider {
     public synchronized boolean unregisterReader(MessageReader reader) {
         ResourceUnavailableException.verifyOpen(isOpen,"Log",name);
         return this.readers.remove(reader);
+    }
+
+    private class MessageReaderStateUpdater implements Runnable {
+        @Override
+        public void run() {
+            for (MessageReader reader : readers) {
+                reader.updateState();
+            }
+        }
     }
 
     /**
@@ -662,7 +676,7 @@ public class KCVSLog implements Log, BackendOperation.TransactionalProvider {
         @Override
         public void run() {
             try {
-                if (allowReadMarkerRecovery) setReadMarker();
+                setReadMarker();
 
                 final int timeslice = getTimeSlice(messageTimeStart);
 

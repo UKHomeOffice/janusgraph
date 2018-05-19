@@ -1,10 +1,5 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
-    <parent>
-        <groupId>org.sonatype.oss</groupId>
-        <artifactId>oss-parent</artifactId>
-        <version>7</version>
-    </parent>
     <groupId>org.janusgraph</groupId>
     <artifactId>janusgraph</artifactId>
     <version>100.2.0-SNAPSHOT</version>
@@ -62,10 +57,20 @@
         <url>git@github.com:JanusGraph/janusgraph.git</url>
         <tag>HEAD</tag>
     </scm>
+    <distributionManagement>
+        <snapshotRepository>
+            <id>ossrh</id>
+            <url>https://oss.sonatype.org/content/repositories/snapshots</url>
+        </snapshotRepository>
+        <repository>
+            <id>ossrh</id>
+            <url>https://oss.sonatype.org/service/local/staging/deploy/maven2/</url>
+        </repository>
+    </distributionManagement>
     <properties>
         <janusgraph.compatible.versions>0.1.0,0.1.1,0.2.0</janusgraph.compatible.versions>
         <titan.compatible-versions>1.0.0,1.1.0-SNAPSHOT</titan.compatible-versions>
-        <tinkerpop.version>3.3.1</tinkerpop.version>
+        <tinkerpop.version>3.3.3</tinkerpop.version>
         <junit.version>4.12</junit.version>
         <mrunit.version>1.1.0</mrunit.version>
         <mockito.version>1.10.19</mockito.version>
@@ -81,13 +86,18 @@
         <hbase098.version>${hbase098.core.version}-hadoop2</hbase098.version>
         <hbase100.core.version>1.3.1</hbase100.core.version>
         <hbase100.version>${hbase100.core.version}</hbase100.version>
-        <bigtable.version>1.0.0-pre3</bigtable.version>
+        <bigtable.version>1.0.0</bigtable.version>
         <scylladb.version>1.7.1</scylladb.version>
         <!-- align with org.apache.hbase:hbase -->
         <jackson1.version>1.9.13</jackson1.version>
+<!--
         <jackson2.version>2.8.6</jackson2.version>
         <lucene-solr.version>6.6.0</lucene-solr.version>
         <elasticsearch.version>5.6.3</elasticsearch.version>
+-->
+        <jackson2.version>2.6.6</jackson2.version>
+        <lucene-solr.version>7.0.0</lucene-solr.version>
+        <elasticsearch.version>6.0.1</elasticsearch.version>
         <commons.beanutils.version>1.7.0</commons.beanutils.version>
         <commons.collections.version>3.2.2</commons.collections.version>
         <joda.version>2.8.2</joda.version>
@@ -99,7 +109,7 @@
         <zookeeper.version>3.4.6</zookeeper.version>
         <jersey.version>1.9</jersey.version>
         <!-- align with org.apache.tinkerpop:tinkerpop -->
-        <netty4.version>4.0.53.Final</netty4.version>
+        <netty4.version>4.0.56.Final</netty4.version>
         <jna.version>4.0.0</jna.version>
         <kuali.s3.wagon.version>1.1.20</kuali.s3.wagon.version>
         <jasper.version>5.5.23</jasper.version>
@@ -121,11 +131,12 @@
         <compiler.target>1.8</compiler.target>
         <test.excluded.groups>org.janusgraph.testcategory.MemoryTests,org.janusgraph.testcategory.PerformanceTests,org.janusgraph.testcategory.BrittleTests</test.excluded.groups>
         <dependency.locations.enabled>false</dependency.locations.enabled>
-        <cassandra-driver.version>3.1.4</cassandra-driver.version>
+        <cassandra-driver.version>3.3.2</cassandra-driver.version>
     </properties>
     <modules>
         <module>janusgraph-codepipelines-ci</module>
         <module>janusgraph-core</module>
+        <module>janusgraph-server</module>
         <module>janusgraph-test</module>
         <module>janusgraph-berkeleyje</module>
         <module>janusgraph-cql</module>
@@ -138,7 +149,7 @@
         <module>janusgraph-all</module>
         <module>janusgraph-dist</module>
         <module>janusgraph-doc</module>
-        <module>janusgraph-solr</module>
+        <!-- module>janusgraph-solr</module -->
 	<!-- <module>hbase</module> -->
     </modules>
     <repositories>
@@ -232,6 +243,7 @@
                       profile id listed below.
                     -->
                     <releaseProfiles>janusgraph-release</releaseProfiles>
+                    <useReleaseProfile>false</useReleaseProfile>
 
                     <!-- Keep all submodules at same version as parent -->
                     <autoVersionSubmodules>true</autoVersionSubmodules>
@@ -363,14 +375,7 @@
                 </plugin>
                 <plugin>
                     <artifactId>maven-release-plugin</artifactId>
-                    <version>2.5</version>
-                    <dependencies>
-                        <dependency>
-                            <groupId>org.apache.maven.scm</groupId>
-                            <artifactId>maven-scm-provider-gitexe</artifactId>
-                            <version>1.9</version>
-                        </dependency>
-                    </dependencies>
+                    <version>2.5.3</version>
                 </plugin>
                 <plugin>
                     <artifactId>maven-javadoc-plugin</artifactId>
@@ -1109,45 +1114,6 @@
     </dependencies>
 
     <profiles>
-        <profile>
-            <id>sonatype-oss-release</id>
-            <build>
-                <plugins>
-                    <plugin>
-                        <groupId>org.apache.maven.plugins</groupId>
-                        <artifactId>maven-source-plugin</artifactId>
-                        <version>2.1.2</version>
-                        <executions>
-                            <execution>
-                                <id>attach-sources</id>
-                                <phase>none</phase>
-                            </execution>
-                        </executions>
-                    </plugin>
-                    <plugin>
-                        <groupId>org.apache.maven.plugins</groupId>
-                        <artifactId>maven-javadoc-plugin</artifactId>
-                        <version>${maven.javadoc.version}</version>
-                        <executions>
-                            <execution>
-                                <id>attach-javadocs</id>
-                                <phase>none</phase>
-                            </execution>
-                        </executions>
-                    </plugin>
-                    <plugin>
-                        <artifactId>maven-gpg-plugin</artifactId>
-                        <version>${maven.gpg.version}</version>
-                        <executions>
-                            <execution>
-                                <id>sign-artifacts</id>
-                                <phase>none</phase>
-                            </execution>
-                        </executions>
-                    </plugin>
-                </plugins>
-            </build>
-        </profile>
 
         <profile>
             <id>janusgraph-release</id>
@@ -1731,45 +1697,5 @@
             </build>
         </profile>
 
-
-        <!--
-        <profile>
-            <id>docbkx</id>
-            <activation>
-                <activeByDefault>false</activeByDefault>
-            </activation>
-            <build>
-                <plugins>
-                    <plugin>
-                        <groupId>com.agilejava.docbkx</groupId>
-                        <artifactId>docbkx-maven-plugin</artifactId>
-                        <version>2.0.15</version>
-                        <dependencies>
-                            <dependency>
-                                <groupId>net.sf.xslthl</groupId>
-                                <artifactId>xslthl</artifactId>
-                                <version>2.1.0</version>
-                                <scope>runtime</scope>
-                            </dependency>
-                            <dependency>
-                                <groupId>net.sf.offo</groupId>
-                                <artifactId>fop-hyph</artifactId>
-                                <version>1.2</version>
-                                <scope>runtime</scope>
-                            </dependency>
-                        </dependencies>
-                        <configuration>
-                            <highlightSource>1</highlightSource>
-                            <htmlCustomization>htcust.xsl</htmlCustomization>
-                            <hyphenate>false</hyphenate>
-                            <sourceDirectory>${project.basedir}/target/generated-docs/</sourceDirectory>
-                            <includes>index.xml</includes>
-                            <hyphenateVerbatim>false</hyphenateVerbatim>
-                        </configuration>
-                    </plugin>
-                </plugins>
-            </build>
-        </profile>
-        -->
     </profiles>
 </project>

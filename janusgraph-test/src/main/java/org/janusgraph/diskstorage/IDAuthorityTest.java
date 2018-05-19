@@ -199,7 +199,7 @@ public abstract class IDAuthorityTest {
         try {
             block.getId(blockSize);
             fail();
-        } catch (ArrayIndexOutOfBoundsException e) {}
+        } catch (ArrayIndexOutOfBoundsException ignored) {}
     }
 
 //    private void checkIdList(List<Long> ids) {
@@ -277,7 +277,7 @@ public abstract class IDAuthorityTest {
             try {
                 idAuthorities[0].getIDBlock(0,0,GET_ID_BLOCK_TIMEOUT);
                 Assert.fail();
-            } catch (IDPoolExhaustedException e) {}
+            } catch (IDPoolExhaustedException ignored) {}
         } else {
             for (int i=0;i<(chunks*Math.max(1,(1<<uidBitWidth)/10));i++) {
                 idAuthorities[0].getIDBlock(0,0,GET_ID_BLOCK_TIMEOUT);
@@ -287,7 +287,7 @@ public abstract class IDAuthorityTest {
                     idAuthorities[0].getIDBlock(0,0,GET_ID_BLOCK_TIMEOUT);
                 }
                 Assert.fail();
-            } catch (IDPoolExhaustedException e) {}
+            } catch (IDPoolExhaustedException ignored) {}
         }
     }
 
@@ -311,7 +311,7 @@ public abstract class IDAuthorityTest {
     }
 
     @Test
-    public void testManyThreadsOneIDAuthority() throws BackendException, InterruptedException, ExecutionException {
+    public void testManyThreadsOneIDAuthority() throws InterruptedException, ExecutionException {
 
         ExecutorService es = Executors.newFixedThreadPool(CONCURRENCY);
 
@@ -349,11 +349,7 @@ public abstract class IDAuthorityTest {
         }
 
         for (Future<Void> f : futures) {
-            try {
-                f.get();
-            } catch (ExecutionException e) {
-                throw e;
-            }
+            f.get();
         }
 
         es.shutdownNow();
@@ -491,7 +487,7 @@ public abstract class IDAuthorityTest {
             return block;
         }
 
-        private boolean throwIterationsExceededException() {
+        private void throwIterationsExceededException() {
             throw new RuntimeException(
                     "Exceeded maximum ID allocation iteration count ("
                             + maxIterations + "); too many timeouts?");

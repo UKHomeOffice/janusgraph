@@ -89,7 +89,7 @@ public class HBaseKeyColumnValueStore implements KeyColumnValueStore {
 
     @Override
     public EntryList getSlice(KeySliceQuery query, StoreTransaction txh) throws BackendException {
-        Map<StaticBuffer, EntryList> result = getHelper(Arrays.asList(query.getKey()), getFilter(query));
+        Map<StaticBuffer, EntryList> result = getHelper(Collections.singletonList(query.getKey()), getFilter(query));
         return Iterables.getOnlyElement(result.values(), EntryList.EMPTY_LIST);
     }
 
@@ -165,7 +165,7 @@ public class HBaseKeyColumnValueStore implements KeyColumnValueStore {
 
         try {
             TableMask table = null;
-            Result[] results = null;
+            final Result[] results;
 
             try {
                 table = cnx.getTable(tableName);
@@ -180,7 +180,7 @@ public class HBaseKeyColumnValueStore implements KeyColumnValueStore {
             assert results.length==keys.size();
 
             for (int i = 0; i < results.length; i++) {
-                Result result = results[i];
+                final Result result = results[i];
                 NavigableMap<byte[], NavigableMap<byte[], NavigableMap<Long, byte[]>>> f = result.getMap();
 
                 if (f == null) { // no result for this key

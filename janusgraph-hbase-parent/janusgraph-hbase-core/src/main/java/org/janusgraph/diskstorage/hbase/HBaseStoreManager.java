@@ -135,6 +135,17 @@ public class HBaseStoreManager extends DistributedStoreManager implements KeyCol
             " If this configuration option is not provided but graph.graphname is, the table will be set" +
             " to that value.",
             ConfigOption.Type.LOCAL, "janusgraph");
+    
+    public static final ConfigOption<String> HBASE_SNAPSHOT =
+            new ConfigOption<>(HBASE_NS, "snapshot-name",
+            "The name of an exising HBase snapshot to be used by HBaseSnapshotInputFormat",
+            ConfigOption.Type.LOCAL, "janusgraph-snapshot");
+    
+    public static final ConfigOption<String> HBASE_SNAPSHOT_RESTORE_DIR =
+            new ConfigOption<>(HBASE_NS, "snapshot-restore-dir",
+            "The tempoary directory to be used by HBaseSnapshotInputFormat to restore a snapshot." +
+            " This directory should be on the same File System as the HBase root dir.",
+            ConfigOption.Type.LOCAL, System.getProperty("java.io.tmpdir"));
 
     /**
      * Related bug fixed in 0.98.0, 0.94.7, 0.95.0:
@@ -243,10 +254,8 @@ public class HBaseStoreManager extends DistributedStoreManager implements KeyCol
     private final int regionCount;
     private final int regionsPerServer;
     private final ConnectionMask cnx;
-    private final org.apache.hadoop.conf.Configuration hconf;
     private final boolean shortCfNames;
     private final boolean skipSchemaCheck;
-    private final String compatClass;
     private final HBaseCompat compat;
     // Cached return value of getDeployment() as requesting it can be expensive.
     private Deployment deployment = null;
@@ -272,7 +281,7 @@ public class HBaseStoreManager extends DistributedStoreManager implements KeyCol
         this.regionCount = config.has(REGION_COUNT) ? config.get(REGION_COUNT) : -1;
         this.regionsPerServer = config.has(REGIONS_PER_SERVER) ? config.get(REGIONS_PER_SERVER) : -1;
         this.skipSchemaCheck = config.get(SKIP_SCHEMA_CHECK);
-        this.compatClass = config.has(COMPAT_CLASS) ? config.get(COMPAT_CLASS) : null;
+        final String compatClass = config.has(COMPAT_CLASS) ? config.get(COMPAT_CLASS) : null;
         this.compat = HBaseCompatLoader.getCompat(compatClass);
 
         /*
@@ -289,7 +298,7 @@ public class HBaseStoreManager extends DistributedStoreManager implements KeyCol
          * which in turn applies the contents of hbase-default.xml and then
          * applies the contents of hbase-site.xml.
          */
-        this.hconf = HBaseConfiguration.create();
+        final org.apache.hadoop.conf.Configuration hconf = HBaseConfiguration.create();
 
         // Copy a subset of our commons config into a Hadoop config
         int keysLoaded=0;
@@ -438,9 +447,7 @@ public class HBaseStoreManager extends DistributedStoreManager implements KeyCol
             } finally {
                 IOUtils.closeQuietly(table);
             }
-        } catch (IOException e) {
-            throw new TemporaryBackendException(e);
-        } catch (InterruptedException e) {
+        } catch (IOException | InterruptedException e) {
             throw new TemporaryBackendException(e);
         }
 
@@ -628,9 +635,6 @@ public class HBaseStoreManager extends DistributedStoreManager implements KeyCol
                 // Replace null end key with zeroes
                 b.put(new KeyRange(StaticArrayBuffer.of(zeroExtend(startKey)), FOUR_ZERO_BYTES), serverName);
             } else {
-                Preconditions.checkState(null != startKey);
-                Preconditions.checkState(null != endKey);
-
                 // Convert HBase's inclusive end keys into exclusive JanusGraph end keys
                 StaticBuffer startBuf = StaticArrayBuffer.of(zeroExtend(startKey));
                 StaticBuffer endBuf = StaticArrayBuffer.of(zeroExtend(endKey));
@@ -642,7 +646,7 @@ public class HBaseStoreManager extends DistributedStoreManager implements KeyCol
         }
 
         // Require either no null key bounds or a pair of them
-        Preconditions.checkState(!(null == nullStart ^ null == nullEnd));
+        Preconditions.checkState((null == nullStart) == (null == nullEnd));
 
         // Check that every key in the result is at least 4 bytes long
         Map<KeyRange, ServerName> result = b.build();
@@ -662,7 +666,7 @@ public class HBaseStoreManager extends DistributedStoreManager implements KeyCol
      * @param dataToPad non-null but possibly zero-length byte array
      * @return either the parameter or a new array
      */
-    private final byte[] zeroExtend(byte[] dataToPad) {
+    private byte[] zeroExtend(byte[] dataToPad) {
         assert null != dataToPad;
 
         final int targetLength = 4;
@@ -672,8 +676,7 @@ public class HBaseStoreManager extends DistributedStoreManager implements KeyCol
 
         byte padded[] = new byte[targetLength];
 
-        for (int i = 0; i < dataToPad.length; i++)
-            padded[i] = dataToPad[i];
+        System.arraycopy(dataToPad, 0, padded, 0, dataToPad.length);
 
         for (int i = dataToPad.length; i < padded.length; i++)
             padded[i] = (byte)0;

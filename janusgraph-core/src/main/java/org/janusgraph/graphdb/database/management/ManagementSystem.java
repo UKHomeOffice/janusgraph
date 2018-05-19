@@ -20,6 +20,7 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
 import org.janusgraph.core.Cardinality;
+import org.janusgraph.core.Connection;
 import org.janusgraph.core.EdgeLabel;
 import org.janusgraph.core.Multiplicity;
 import org.janusgraph.core.PropertyKey;
@@ -64,6 +65,7 @@ import org.janusgraph.graphdb.internal.InternalRelationType;
 import org.janusgraph.graphdb.internal.Order;
 import org.janusgraph.graphdb.internal.JanusGraphSchemaCategory;
 import org.janusgraph.graphdb.internal.Token;
+import org.janusgraph.graphdb.management.JanusGraphManager;
 import org.janusgraph.graphdb.olap.VertexJobConverter;
 import org.janusgraph.graphdb.olap.job.IndexRemoveJob;
 import org.janusgraph.graphdb.olap.job.IndexRepairJob;
@@ -85,7 +87,6 @@ import org.janusgraph.graphdb.types.TypeDefinitionMap;
 import org.janusgraph.graphdb.types.VertexLabelVertex;
 import org.janusgraph.graphdb.types.indextype.IndexTypeWrapper;
 import org.janusgraph.graphdb.types.system.BaseKey;
-import org.janusgraph.graphdb.types.system.BaseLabel;
 import org.janusgraph.graphdb.types.system.SystemTypeManager;
 import org.janusgraph.graphdb.types.vertices.EdgeLabelVertex;
 import org.janusgraph.graphdb.types.vertices.PropertyKeyVertex;
@@ -134,7 +135,6 @@ public class ManagementSystem implements JanusGraphManagement {
     private final Log sysLog;
     private final ManagementLogger managementLogger;
 
-    private final KCVSConfiguration baseConfig;
     private final TransactionalConfiguration transactionalConfig;
     private final ModifiableConfiguration modifyConfig;
     private final UserModifiableConfiguration userConfig;
@@ -143,6 +143,7 @@ public class ManagementSystem implements JanusGraphManagement {
     private final StandardJanusGraphTx transaction;
 
     private final Set<JanusGraphSchemaVertex> updatedTypes;
+    private boolean evictGraphFromCache;
     private final List<Callable<Boolean>> updatedTypeTriggers;
 
     private final Instant txStartTime;
@@ -153,16 +154,16 @@ public class ManagementSystem implements JanusGraphManagement {
                             ManagementLogger managementLogger, SchemaCache schemaCache) {
         Preconditions.checkArgument(config != null && graph != null && sysLog != null && managementLogger != null);
         this.graph = graph;
-        this.baseConfig = config;
         this.sysLog = sysLog;
         this.managementLogger = managementLogger;
         this.schemaCache = schemaCache;
-        this.transactionalConfig = new TransactionalConfiguration(baseConfig);
+        this.transactionalConfig = new TransactionalConfiguration(config);
         this.modifyConfig = new ModifiableConfiguration(ROOT_NS,
                 transactionalConfig, BasicConfiguration.Restriction.GLOBAL);
         this.userConfig = new UserModifiableConfiguration(modifyConfig, configVerifier);
 
         this.updatedTypes = new HashSet<>();
+        this.evictGraphFromCache = false;
         this.updatedTypeTriggers = new ArrayList<>();
         this.graphShutdownRequired = false;
 
@@ -238,8 +239,8 @@ public class ManagementSystem implements JanusGraphManagement {
         transaction.commit();
 
         //Communicate schema changes
-        if (!updatedTypes.isEmpty()) {
-            managementLogger.sendCacheEviction(updatedTypes, updatedTypeTriggers, getOpenInstancesInternal());
+        if (!updatedTypes.isEmpty() || evictGraphFromCache) {
+            managementLogger.sendCacheEviction(updatedTypes, evictGraphFromCache, updatedTypeTriggers, getOpenInstancesInternal());
             for (JanusGraphSchemaVertex schemaVertex : updatedTypes) {
                 schemaCache.expireSchemaElement(schemaVertex.longId());
             }
@@ -271,11 +272,7 @@ public class ManagementSystem implements JanusGraphManagement {
     }
 
     private JanusGraphEdge addSchemaEdge(JanusGraphVertex out, JanusGraphVertex in, TypeDefinitionCategory def, Object modifier) {
-        assert def.isEdge();
-        JanusGraphEdge edge = transaction.addEdge(out, in, BaseLabel.SchemaDefinitionEdge);
-        TypeDefinitionDescription desc = new TypeDefinitionDescription(def, modifier);
-        edge.property(BaseKey.SchemaDefinitionDesc.name(), desc);
-        return edge;
+        return transaction.addSchemaEdge(out, in, def, modifier);
     }
 
     // ###### INDEXING SYSTEM #####################
@@ -431,7 +428,7 @@ public class ManagementSystem implements JanusGraphManagement {
             })
             .filter(indexType -> indexType.getElement().subsumedBy(elementType))
             .map(JanusGraphIndexWrapper::new)
-        .collect(Collectors.toList());
+            .collect(Collectors.toList());
     }
 
     /**
@@ -517,7 +514,7 @@ public class ManagementSystem implements JanusGraphManagement {
         int arrPosition = parameters.length;
         if (addMappingParameter) extendedParas[arrPosition++] = ParameterType.MAPPED_NAME.getParameter(
                 graph.getIndexSerializer().getDefaultFieldName(key, parameters, indexType.getBackingIndexName()));
-        extendedParas[arrPosition++] = ParameterType.STATUS.getParameter(key.isNew() ? SchemaStatus.ENABLED : SchemaStatus.INSTALLED);
+        extendedParas[arrPosition] = ParameterType.STATUS.getParameter(key.isNew() ? SchemaStatus.ENABLED : SchemaStatus.INSTALLED);
 
         addSchemaEdge(indexVertex, key, TypeDefinitionCategory.INDEX_FIELD, extendedParas);
         updateSchemaVertex(indexVertex);
@@ -744,6 +741,31 @@ public class ManagementSystem implements JanusGraphManagement {
                 throw new UnsupportedOperationException("Update action not supported: " + updateAction);
         }
         return future;
+    }
+
+    /**
+     * Upon the open managementsystem's commit, this graph will be asynchronously evicted from the cache on all JanusGraph nodes in your
+     * cluster, once there are no open transactions on this graph on each respective JanusGraph node
+     * and assuming each node is correctly configured to use the {@link JanusGraphManager}.
+     */
+    public void evictGraphFromCache() {
+        this.evictGraphFromCache = true;
+        setUpdateTrigger(new GraphCacheEvictionCompleteTrigger(this.graph.getGraphName()));
+    }
+
+    private static class GraphCacheEvictionCompleteTrigger implements Callable<Boolean> {
+        private static final Logger log = LoggerFactory.getLogger(GraphCacheEvictionCompleteTrigger.class);
+        private final String graphName;
+
+        private GraphCacheEvictionCompleteTrigger(String graphName) {
+            this.graphName = graphName;
+        }
+
+        @Override
+        public Boolean call() {
+            log.info("Graph {} has been removed from the graph cache on every JanusGraph node in the cluster.", graphName);
+            return true;
+        }
     }
 
     private static class EmptyIndexJobFuture implements IndexJobFuture {
@@ -1005,7 +1027,8 @@ public class ManagementSystem implements JanusGraphManagement {
     public void changeName(JanusGraphSchemaElement element, String newName) {
         Preconditions.checkArgument(StringUtils.isNotBlank(newName), "Invalid name: %s", newName);
         JanusGraphSchemaVertex schemaVertex = getSchemaVertex(element);
-        if (schemaVertex.name().equals(newName)) return;
+        String oldName = schemaVertex.name();
+        if (oldName.equals(newName)) return;
 
         JanusGraphSchemaCategory schemaCategory = schemaVertex.valueOrNull(BaseKey.SchemaCategory);
         Preconditions.checkArgument(schemaCategory.hasName(), "Invalid schema element: %s", element);
@@ -1018,17 +1041,31 @@ public class ManagementSystem implements JanusGraphManagement {
 
             JanusGraphSchemaCategory cat = relType.isEdgeLabel() ?
                     JanusGraphSchemaCategory.EDGELABEL : JanusGraphSchemaCategory.PROPERTYKEY;
-            SystemTypeManager.isNotSystemName(cat, newName);
+            SystemTypeManager.throwIfSystemName(cat, newName);
         } else if (element instanceof VertexLabel) {
-            SystemTypeManager.isNotSystemName(JanusGraphSchemaCategory.VERTEXLABEL, newName);
+            SystemTypeManager.throwIfSystemName(JanusGraphSchemaCategory.VERTEXLABEL, newName);
         } else if (element instanceof JanusGraphIndex) {
             checkIndexName(newName);
         }
 
         transaction.addProperty(schemaVertex, BaseKey.SchemaName, schemaCategory.getSchemaName(newName));
+
+        updateConnectionEdgeConstraints(schemaVertex, oldName, newName);
+
         updateSchemaVertex(schemaVertex);
         schemaVertex.resetCache();
         updatedTypes.add(schemaVertex);
+    }
+
+    private void updateConnectionEdgeConstraints(JanusGraphSchemaVertex edgeLabel, String oldName, String newName) {
+        if (!(edgeLabel instanceof EdgeLabel)) return;
+        ((EdgeLabel) edgeLabel).mappedConnections().stream()
+            .peek(s -> schemaCache.expireSchemaElement(s.getOutgoingVertexLabel().longId()))
+            .map(Connection::getConnectionEdge)
+            .forEach(edge -> {
+                TypeDefinitionDescription desc = new TypeDefinitionDescription(TypeDefinitionCategory.CONNECTION_EDGE, newName);
+                edge.property(BaseKey.SchemaDefinitionDesc.name(), desc);
+            });
     }
 
     public JanusGraphSchemaVertex getSchemaVertex(JanusGraphSchemaElement element) {
@@ -1243,14 +1280,16 @@ public class ManagementSystem implements JanusGraphManagement {
     @Override
     public <T extends RelationType> Iterable<T> getRelationTypes(Class<T> clazz) {
         Preconditions.checkNotNull(clazz);
-        Iterable<? extends JanusGraphVertex> types = null;
+        final Iterable<? extends JanusGraphVertex> types;
         if (PropertyKey.class.equals(clazz)) {
             types = QueryUtil.getVertices(transaction, BaseKey.SchemaCategory, JanusGraphSchemaCategory.PROPERTYKEY);
         } else if (EdgeLabel.class.equals(clazz)) {
             types = QueryUtil.getVertices(transaction, BaseKey.SchemaCategory, JanusGraphSchemaCategory.EDGELABEL);
         } else if (RelationType.class.equals(clazz)) {
             types = Iterables.concat(getRelationTypes(EdgeLabel.class), getRelationTypes(PropertyKey.class));
-        } else throw new IllegalArgumentException("Unknown type class: " + clazz);
+        } else {
+            throw new IllegalArgumentException("Unknown type class: " + clazz);
+        }
         return Iterables.filter(Iterables.filter(types, clazz), t -> {
             //Filter out all relation type indexes
             return ((InternalRelationType) t).getBaseType() == null;
@@ -1275,6 +1314,21 @@ public class ManagementSystem implements JanusGraphManagement {
     @Override
     public VertexLabelMaker makeVertexLabel(String name) {
         return transaction.makeVertexLabel(name);
+    }
+
+    @Override
+    public VertexLabel addProperties(VertexLabel vertexLabel, PropertyKey... keys) {
+        return transaction.addProperties(vertexLabel, keys);
+    }
+
+    @Override
+    public EdgeLabel addProperties(EdgeLabel edgeLabel, PropertyKey... keys) {
+        return transaction.addProperties(edgeLabel, keys);
+    }
+
+    @Override
+    public EdgeLabel addConnection(EdgeLabel edgeLabel, VertexLabel outVLabel, VertexLabel inVLabel) {
+        return transaction.addConnection(edgeLabel, outVLabel, inVLabel);
     }
 
     @Override

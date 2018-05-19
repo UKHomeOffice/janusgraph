@@ -32,6 +32,9 @@ import org.janusgraph.diskstorage.EntryList;
 import org.janusgraph.diskstorage.keycolumnvalue.SliceQuery;
 import org.janusgraph.graphdb.query.profile.QueryProfiler;
 import org.janusgraph.graphdb.relations.RelationComparator;
+import org.janusgraph.graphdb.relations.RelationIdentifier;
+import org.janusgraph.graphdb.relations.StandardEdge;
+import org.janusgraph.graphdb.relations.StandardVertexProperty;
 import org.janusgraph.graphdb.tinkerpop.JanusGraphBlueprintsTransaction;
 import org.janusgraph.graphdb.database.EdgeSerializer;
 import org.janusgraph.graphdb.database.IndexSerializer;
@@ -49,9 +52,6 @@ import org.janusgraph.graphdb.query.graph.JointIndexQuery;
 import org.janusgraph.graphdb.query.vertex.MultiVertexCentricQueryBuilder;
 import org.janusgraph.graphdb.query.vertex.VertexCentricQuery;
 import org.janusgraph.graphdb.query.vertex.VertexCentricQueryBuilder;
-import org.janusgraph.graphdb.relations.RelationIdentifier;
-import org.janusgraph.graphdb.relations.StandardEdge;
-import org.janusgraph.graphdb.relations.StandardVertexProperty;
 import org.janusgraph.graphdb.transaction.addedrelations.AddedRelationsContainer;
 import org.janusgraph.graphdb.transaction.addedrelations.ConcurrentBufferAddedRelations;
 import org.janusgraph.graphdb.transaction.addedrelations.SimpleBufferAddedRelations;
@@ -384,8 +384,7 @@ public class StandardJanusGraphTx extends JanusGraphBlueprintsTransaction implem
         //Make canonical partitioned vertex id
         if (idInspector.isPartitionedVertex(vertexId)) vertexId=idManager.getCanonicalVertexId(vertexId);
 
-        InternalVertex v = null;
-        v = vertexCache.get(vertexId, externalVertexRetriever);
+        final InternalVertex v = vertexCache.get(vertexId, externalVertexRetriever);
         return (null == v || v.isRemoved()) ? null : v;
     }
 
@@ -468,7 +467,7 @@ public class StandardJanusGraphTx extends JanusGraphBlueprintsTransaction implem
                 lifecycle = getExistingVertex(canonicalVertexId).getLifeCycle();
             }
 
-            InternalVertex vertex = null;
+            final InternalVertex vertex;
             if (idInspector.isRelationTypeId(vertexId)) {
                 if (idInspector.isPropertyKeyId(vertexId)) {
                     if (IDManager.isSystemRelationTypeId(vertexId)) {
@@ -663,12 +662,40 @@ public class StandardJanusGraphTx extends JanusGraphBlueprintsTransaction implem
         return uniqueLock;
     }
 
+    private void checkPropertyConstraintForVertexOrCreatePropertyConstraint(VertexLabel vertexLabel, PropertyKey key) {
+        if (config.hasDisabledSchemaConstraints()) return;
+        if (vertexLabel instanceof BaseVertexLabel) return;
+        Collection<PropertyKey> propertyKeys = vertexLabel.mappedProperties();
+        if (propertyKeys.contains(key)) return;
+        config.getAutoSchemaMaker().makePropertyConstraintForVertex(vertexLabel, key, this);
+    }
+
+    public void checkPropertyConstraintForEdgeOrCreatePropertyConstraint(EdgeLabel edgeLabel, PropertyKey key) {
+        if (config.hasDisabledSchemaConstraints()) return;
+        if (edgeLabel instanceof BaseLabel) return;
+        Collection<PropertyKey> propertyKeys = edgeLabel.mappedProperties();
+        if (propertyKeys.contains(key)) return;
+        config.getAutoSchemaMaker().makePropertyConstraintForEdge(edgeLabel, key, this);
+    }
+
+    private void checkConnectionConstraintOrCreateConnectionConstraint(VertexLabel outVertexLabel, VertexLabel inVertexLabel, EdgeLabel edgeLabel) {
+        if (config.hasDisabledSchemaConstraints()) return;
+        if (outVertexLabel instanceof BaseVertexLabel) return;
+        if (inVertexLabel instanceof BaseVertexLabel) return;
+        Collection<Connection> connections = outVertexLabel.mappedConnections();
+        for (Connection connection : connections) {
+            if (connection.getIncomingVertexLabel() != inVertexLabel) continue;
+            if (connection.getEdgeLabel().equals(edgeLabel.name())) return;
+        }
+        config.getAutoSchemaMaker().makeConnectionConstraint(edgeLabel, outVertexLabel, inVertexLabel, this);
+    }
 
     public JanusGraphEdge addEdge(JanusGraphVertex outVertex, JanusGraphVertex inVertex, EdgeLabel label) {
         verifyWriteAccess(outVertex, inVertex);
         outVertex = ((InternalVertex) outVertex).it();
         inVertex = ((InternalVertex) inVertex).it();
         Preconditions.checkNotNull(label);
+        checkConnectionConstraintOrCreateConnectionConstraint(outVertex.vertexLabel(), inVertex.vertexLabel(), label);
         Multiplicity multiplicity = label.multiplicity();
         TransactionLock uniqueLock = getUniquenessLock(outVertex, (InternalRelationType) label,inVertex);
         uniqueLock.lock(LOCK_TIMEOUT);
@@ -713,11 +740,12 @@ public class StandardJanusGraphTx extends JanusGraphBlueprintsTransaction implem
 
     public JanusGraphVertexProperty addProperty(VertexProperty.Cardinality cardinality, JanusGraphVertex vertex, PropertyKey key, Object value) {
         if (key.cardinality().convert()!=cardinality && cardinality!=VertexProperty.Cardinality.single)
-                throw new SchemaViolationException(String.format("Key is defined for %s cardinality which conflicts with specified: %s",key.cardinality(),cardinality));
+            throw new SchemaViolationException("Key is defined for %s cardinality which conflicts with specified: %s",key.cardinality(),cardinality);
         verifyWriteAccess(vertex);
         Preconditions.checkArgument(!(key instanceof ImplicitKey),"Cannot create a property of implicit type: %s",key.name());
         vertex = ((InternalVertex) vertex).it();
         Preconditions.checkNotNull(key);
+        checkPropertyConstraintForVertexOrCreatePropertyConstraint(vertex.vertexLabel(), key);
         final Object normalizedValue = verifyAttribute(key, value);
         Cardinality keyCardinality = key.cardinality();
 
@@ -862,6 +890,41 @@ public class StandardJanusGraphTx extends JanusGraphBlueprintsTransaction implem
         return (EdgeLabel) makeSchemaVertex(JanusGraphSchemaCategory.EDGELABEL, name, definition);
     }
 
+
+    public JanusGraphEdge addSchemaEdge(JanusGraphVertex out, JanusGraphVertex in, TypeDefinitionCategory def, Object modifier) {
+        assert def.isEdge();
+        JanusGraphEdge edge = addEdge(out, in, BaseLabel.SchemaDefinitionEdge);
+        TypeDefinitionDescription desc = new TypeDefinitionDescription(def, modifier);
+        edge.property(BaseKey.SchemaDefinitionDesc.name(), desc);
+        return edge;
+    }
+
+    @Override
+    public VertexLabel addProperties(VertexLabel vertexLabel, PropertyKey... keys) {
+        for (PropertyKey key : keys) {
+            addSchemaEdge(vertexLabel, key, TypeDefinitionCategory.PROPERTY_KEY_EDGE, null);
+        }
+        return vertexLabel;
+    }
+
+    @Override
+    public EdgeLabel addProperties(EdgeLabel edgeLabel, PropertyKey... keys) {
+        for (PropertyKey key : keys) {
+            if (key.cardinality() != Cardinality.SINGLE) {
+                throw new IllegalArgumentException(String.format("An Edge [%s] can not have a property [%s] with the cardinality [%s].", edgeLabel, key, key.cardinality()));
+            }
+            addSchemaEdge(edgeLabel, key, TypeDefinitionCategory.PROPERTY_KEY_EDGE, null);
+        }
+        return edgeLabel;
+    }
+
+    @Override
+    public EdgeLabel addConnection(EdgeLabel edgeLabel, VertexLabel outVLabel, VertexLabel inVLabel) {
+        addSchemaEdge(outVLabel, inVLabel, TypeDefinitionCategory.CONNECTION_EDGE, edgeLabel.name());
+        addSchemaEdge(edgeLabel, outVLabel, TypeDefinitionCategory.UPDATE_CONNECTION_EDGE, null);
+        return edgeLabel;
+    }
+
     public JanusGraphSchemaVertex getSchemaVertex(String schemaName) {
         Long schemaId = newTypeCache.get(schemaName);
         if (schemaId==null) schemaId=graph.getSchemaCache().getSchemaId(schemaName);
@@ -960,14 +1023,12 @@ public class StandardJanusGraphTx extends JanusGraphBlueprintsTransaction implem
 
     @Override
     public PropertyKeyMaker makePropertyKey(String name) {
-        StandardPropertyKeyMaker maker = new StandardPropertyKeyMaker(this, name, indexSerializer, attributeHandler);
-        return maker;
+        return new StandardPropertyKeyMaker(this, name, indexSerializer, attributeHandler);
     }
 
     @Override
     public EdgeLabelMaker makeEdgeLabel(String name) {
-        StandardEdgeLabelMaker maker = new StandardEdgeLabelMaker(this, name, indexSerializer, attributeHandler);
-        return maker;
+        return new StandardEdgeLabelMaker(this, name, indexSerializer, attributeHandler);
     }
 
     //-------- Vertex Labels -----------------
@@ -1087,8 +1148,7 @@ public class StandardJanusGraphTx extends JanusGraphBlueprintsTransaction implem
             if (vertex.isNew()) return false;
             //In addition to deleted, we need to also check for added relations since those can potentially
             //replace existing ones due to a multiplicity constraint
-            if (vertex.hasRemovedRelations() || vertex.hasAddedRelations()) return true;
-            return false;
+            return vertex.hasRemovedRelations() || vertex.hasAddedRelations();
         }
 
         @Override
@@ -1099,7 +1159,7 @@ public class StandardJanusGraphTx extends JanusGraphBlueprintsTransaction implem
             InternalVertex vertex = query.getVertex();
             if (type.multiplicity().isConstrained() && vertex.hasAddedRelations()) {
                 final RelationComparator comparator = new RelationComparator(vertex);
-                if (!Iterables.isEmpty(vertex.getAddedRelations(internalRelation -> comparator.compare((InternalRelation)result,internalRelation)==0))) return true;
+                return !Iterables.isEmpty(vertex.getAddedRelations(internalRelation -> comparator.compare((InternalRelation) result, internalRelation) == 0));
             }
             return false;
         }

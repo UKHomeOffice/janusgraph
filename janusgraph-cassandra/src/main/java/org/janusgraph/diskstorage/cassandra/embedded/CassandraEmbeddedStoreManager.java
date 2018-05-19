@@ -73,7 +73,7 @@ public class CassandraEmbeddedStoreManager extends AbstractCassandraStoreManager
 
     private final IRequestScheduler requestScheduler;
 
-    public CassandraEmbeddedStoreManager(Configuration config) throws BackendException {
+    public CassandraEmbeddedStoreManager(Configuration config) {
         super(config);
 
         String cassandraConfig = CASSANDRA_YAML_DEFAULT;
@@ -120,7 +120,6 @@ public class CassandraEmbeddedStoreManager extends AbstractCassandraStoreManager
     @Override
     public void close() {
         openStores.clear();
-        CassandraDaemonWrapper.stop();
     }
 
     @Override
@@ -295,18 +294,13 @@ public class CassandraEmbeddedStoreManager extends AbstractCassandraStoreManager
         }
     }
 
-    private void ensureColumnFamilyExists(String ksName, String cfName) throws BackendException {
-        ensureColumnFamilyExists(ksName, cfName, BytesType.instance);
-    }
-
-    private void ensureColumnFamilyExists(String keyspaceName, String columnFamilyName, AbstractType<?> comparator)
-        throws BackendException {
+    private void ensureColumnFamilyExists(String keyspaceName, String columnFamilyName) throws BackendException {
         if (null != Schema.instance.getCFMetaData(keyspaceName, columnFamilyName))
             return;
 
         // Column Family not found; create it
         final CFMetaData cfm = new CFMetaData(keyspaceName, columnFamilyName, ColumnFamilyType.Standard,
-            CellNames.fromAbstractType(comparator, true));
+            CellNames.fromAbstractType(BytesType.instance, true));
         try {
             if (storageConfig.has(COMPACTION_STRATEGY)) {
                 cfm.compactionStrategyClass(CFMetaData.createCompactionStrategy(storageConfig.get(COMPACTION_STRATEGY)));

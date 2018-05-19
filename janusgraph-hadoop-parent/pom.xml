@@ -181,16 +181,20 @@
             <artifactId>cassandra-driver-core</artifactId>
             <version>${cassandra-driver.version}</version>
             <exclusions>
-                <exclusion>
-                    <groupId>javax.validation</groupId>
-                    <artifactId>validation-api</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>com.lmax</groupId>
-                    <artifactId>disruptor</artifactId>
-                </exclusion>
-            </exclusions>
+              <exclusion>
+                <groupId>javax.validation</groupId>
+                <artifactId>validation-api</artifactId>
+              </exclusion>
+              <exclusion>
+                <groupId>com.lmax</groupId>
+                <artifactId>disruptor</artifactId>
+              </exclusion>
 	    
+              <exclusion>
+                <groupId>io.dropwizard.metrics</groupId>
+                <artifactId>metrics-core</artifactId>
+              </exclusion>
+            </exclusions>
         </dependency>
         <!-- Logging backends.
              Enforce a classpath ordering constraint to ensure slf4j-log4j12

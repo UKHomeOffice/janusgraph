@@ -205,7 +205,6 @@ public class SolrIndex implements IndexProvider {
             "When mutating - wait for the index to reflect new mutations before returning. This can have a negative impact on performance.",
             ConfigOption.Type.LOCAL, false);
 
-
     private static final IndexFeatures SOLR_FEATURES = new IndexFeatures.Builder()
         .supportsDocumentTTL()
         .setDefaultStringMapping(Mapping.TEXT)
@@ -301,7 +300,8 @@ public class SolrIndex implements IndexProvider {
      * @param key New key to register
      * @param information data type to register for the key
      * @param tx enclosing transaction
-     * @throws org.janusgraph.diskstorage.BackendException
+     * @throws org.janusgraph.diskstorage.BackendException in case an exception is thrown when
+     * creating a collection.
      */
     @SuppressWarnings("unchecked")
     @Override
@@ -485,7 +485,7 @@ public class SolrIndex implements IndexProvider {
                     final SolrInputDocument doc = new SolrInputDocument();
                     doc.setField(getKeyFieldId(collectionName), docID);
                     final Map<String, Object> adds = collectFieldValues(content, collectionName, information);
-                    adds.forEach((key, value) -> doc.setField(key, value));
+                    adds.forEach(doc::setField);
                     newDocuments.add(doc);
                 }
                 commitDeletes(collectionName, deleteIds);
@@ -683,12 +683,11 @@ public class SolrIndex implements IndexProvider {
             } else if (value instanceof String) {
                 final Mapping map = getStringMapping(information.get(key));
                 assert map==Mapping.TEXT || map==Mapping.STRING;
-                if (map==Mapping.TEXT && !Text.HAS_CONTAINS.contains(predicate))
-                    throw new IllegalArgumentException("Text mapped string values only support CONTAINS queries and not: "
-                            + predicate);
+
+                if (map==Mapping.TEXT && !(Text.HAS_CONTAINS.contains(predicate) || predicate instanceof Cmp))
+                    throw new IllegalArgumentException("Text mapped string values only support CONTAINS and Compare queries and not: " + predicate);
                 if (map==Mapping.STRING && Text.HAS_CONTAINS.contains(predicate))
-                    throw new IllegalArgumentException("String mapped string values do not support CONTAINS queries: "
-                            + predicate);
+                    throw new IllegalArgumentException("String mapped string values do not support CONTAINS queries: " + predicate);
 
                 //Special case
                 if (predicate == Text.CONTAINS) {
@@ -710,6 +709,14 @@ public class SolrIndex implements IndexProvider {
                     return ("-" + key + ":\"" + escapeValue(value) + "\"");
                 } else if (predicate == Text.FUZZY || predicate == Text.CONTAINS_FUZZY) {
                     return (key + ":"+escapeValue(value)+"~");
+                } else if (predicate == Cmp.LESS_THAN) {
+                    return (key + ":[* TO \"" + escapeValue(value) + "\"}");
+                } else if (predicate == Cmp.LESS_THAN_EQUAL) {
+                     return (key + ":[* TO \"" + escapeValue(value) + "\"]");
+                } else if (predicate == Cmp.GREATER_THAN) {
+                    return (key + ":{\"" + escapeValue(value) + "\" TO *]");
+                } else if (predicate == Cmp.GREATER_THAN_EQUAL) {
+                     return (key + ":[\"" + escapeValue(value) + "\" TO *]");
                 } else {
                     throw new IllegalArgumentException("Relation is not supported for string value: " + predicate);
                 }
@@ -877,10 +884,9 @@ public class SolrIndex implements IndexProvider {
      * race conditions.
      *
      * @return New Transaction Handle
-     * @throws org.janusgraph.diskstorage.BackendException
      */
     @Override
-    public BaseTransactionConfigurable beginTransaction(BaseTransactionConfig config) throws BackendException {
+    public BaseTransactionConfigurable beginTransaction(BaseTransactionConfig config) {
         return new DefaultTransaction(config);
     }
 
@@ -948,13 +954,12 @@ public class SolrIndex implements IndexProvider {
                     return predicate == Text.CONTAINS || predicate == Text.CONTAINS_PREFIX
                             || predicate == Text.CONTAINS_REGEX || predicate == Text.CONTAINS_FUZZY;
                 case STRING:
-                    return predicate == Cmp.EQUAL || predicate==Cmp.NOT_EQUAL || predicate==Text.REGEX
-                            || predicate==Text.PREFIX  || predicate == Text.FUZZY;
+                    return predicate instanceof Cmp || predicate==Text.REGEX || predicate==Text.PREFIX  || predicate == Text.FUZZY;
 //                case TEXTSTRING:
 //                    return (janusgraphPredicate instanceof Text) || janusgraphPredicate == Cmp.EQUAL || janusgraphPredicate==Cmp.NOT_EQUAL;
             }
         } else if (dataType == Date.class || dataType == Instant.class) {
-            if (predicate instanceof Cmp) return true;
+            return predicate instanceof Cmp;
         } else if (dataType == Boolean.class) {
             return predicate == Cmp.EQUAL || predicate == Cmp.NOT_EQUAL;
         } else if (dataType == UUID.class) {
@@ -980,7 +985,9 @@ public class SolrIndex implements IndexProvider {
 
     @Override
     public String mapKey2Field(String key, KeyInformation keyInfo) {
-        Preconditions.checkArgument(!StringUtils.containsAny(key, new char[]{' '}),"Invalid key name provided: %s",key);
+        IndexProvider.checkKeyValidity(key);
+        key = key.replace(' ', REPLACEMENT_CHAR);
+
         if (!dynFields) return key;
         if (ParameterType.MAPPED_NAME.hasParameter(keyInfo.getParameters())) return key;
         String postfix;
